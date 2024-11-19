@@ -8,10 +8,13 @@ import {
   JoinColumn,
   ManyToOne,
   Point,
+  BaseEntity,
+  Polygon,
+  LineString,
 } from 'typeorm';
 
 @Entity('drivers')
-export class Driver {
+export class Driver extends BaseEntity {
   @PrimaryGeneratedColumn('increment')
   id: number;
 
@@ -73,7 +76,7 @@ export class Driver {
 // src/entities/rider.entity.ts
 
 @Entity('riders')
-export class Rider {
+export class Rider extends BaseEntity {
   @PrimaryGeneratedColumn('increment')
   id: number;
 
@@ -106,8 +109,8 @@ export class Rider {
   updatedAt: Date;
 }
 
-@Entity('vehicleTypes')
-export class VehicleType {
+@Entity('vehicle_types')
+export class VehicleType extends BaseEntity {
   @PrimaryGeneratedColumn('increment')
   id: number;
 
@@ -133,8 +136,8 @@ export class VehicleType {
   updatedAt: Date;
 }
 
-@Entity('rideRequests')
-export class RideRequest {
+@Entity('ride_requests')
+export class RideRequest extends BaseEntity {
   @PrimaryGeneratedColumn('increment')
   id: number;
 
@@ -179,6 +182,265 @@ export class RideRequest {
 
   @Column()
   requestExpiryTime: Date;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+}
+
+@Entity('ride_acceptance_statuses')
+export class RideAcceptanceStatus extends BaseEntity {
+  @PrimaryGeneratedColumn('increment')
+  id: number;
+
+  @ManyToOne(() => Driver)
+  @JoinColumn({ name: 'driverId' })
+  driver: Driver;
+
+  @ManyToOne(() => RideRequest)
+  @JoinColumn({ name: 'rideRequestId' })
+  rideRequest: RideRequest;
+
+  @Column({
+    type: 'enum',
+    enum: ['pending', 'accepted', 'rejected'],
+    default: 'pending',
+  })
+  status: 'pending' | 'accepted' | 'rejected';
+
+  @Column()
+  responseTime: Date;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+}
+
+@Entity('rides')
+export class Ride extends BaseEntity {
+  @PrimaryGeneratedColumn('increment')
+  id: number;
+
+  @ManyToOne(() => RideRequest)
+  @JoinColumn({ name: 'requestId' })
+  request: RideRequest;
+
+  @ManyToOne(() => Driver)
+  @JoinColumn({ name: 'driverId' })
+  driver: Driver;
+
+  @ManyToOne(() => Rider)
+  @JoinColumn({ name: 'riderId' })
+  rider: Rider;
+
+  @ManyToOne(() => VehicleType)
+  @JoinColumn({ name: 'vehicleTypeId' })
+  vehicleType: VehicleType;
+
+  @Column('geography', {
+    spatialFeatureType: 'Point',
+    srid: 4326,
+  })
+  pickupLocation: Point;
+
+  @Column('geography', {
+    spatialFeatureType: 'Point',
+    srid: 4326,
+  })
+  dropoffLocation: Point;
+
+  @Column('geography', {
+    spatialFeatureType: 'Point',
+    srid: 4326,
+    nullable: true,
+  })
+  currentLocation: Point;
+
+  @Column('geography', {
+    spatialFeatureType: 'LineString',
+    srid: 4326,
+    nullable: true,
+  })
+  routeTaken: LineString;
+
+  @Column()
+  startTime: Date;
+
+  @Column({ nullable: true })
+  endTime: Date;
+
+  @Column()
+  estimatedArrivalTime: Date;
+
+  @Column('decimal', { precision: 10, scale: 2 })
+  distance: number;
+
+  @Column('interval')
+  duration: string;
+
+  @Column('decimal', { precision: 10, scale: 2 })
+  baseFare: number;
+
+  @Column('decimal', { precision: 10, scale: 2 })
+  finalFare: number;
+
+  @Column({
+    type: 'enum',
+    enum: ['in_progress', 'completed', 'cancelled'],
+    default: 'in_progress',
+  })
+  status: 'in_progress' | 'completed' | 'cancelled';
+
+  @Column({ nullable: true })
+  cancellationReason: string;
+
+  @Column({
+    type: 'enum',
+    enum: ['rider', 'driver'],
+    nullable: true,
+  })
+  cancelledBy: 'rider' | 'driver';
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+}
+
+@Entity('ratings')
+export class Rating extends BaseEntity {
+  @PrimaryGeneratedColumn('increment')
+  id: number;
+
+  @ManyToOne(() => Ride)
+  @JoinColumn({ name: 'rideId' })
+  ride: Ride;
+
+  @ManyToOne(() => Driver)
+  @JoinColumn({ name: 'driverId' })
+  driver: Driver;
+
+  @ManyToOne(() => Rider)
+  @JoinColumn({ name: 'riderId' })
+  rider: Rider;
+
+  @Column({
+    type: 'enum',
+    enum: ['driver', 'rider'],
+  })
+  ratedBy: 'driver' | 'rider';
+
+  @Column('decimal', { precision: 2, scale: 1 })
+  rating: number;
+
+  @Column({ nullable: true })
+  feedbackText: string;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+}
+
+@Entity('surge_areas')
+export class SurgeArea {
+  @PrimaryGeneratedColumn('increment')
+  id: number;
+
+  @Column()
+  name: string;
+
+  @Column('geography', {
+    spatialFeatureType: 'Polygon',
+    srid: 4326,
+  })
+  area: Polygon;
+
+  @Column('decimal', { precision: 3, scale: 2 })
+  multiplier: number;
+
+  @Column({
+    type: 'enum',
+    enum: ['active', 'inactive'],
+    default: 'active',
+  })
+  status: 'active' | 'inactive';
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+}
+
+@Entity('payments')
+export class Payment {
+  @PrimaryGeneratedColumn('increment')
+  id: number;
+
+  @ManyToOne(() => Ride)
+  @JoinColumn({ name: 'rideId' })
+  ride: Ride;
+
+  @Column('decimal', { precision: 10, scale: 2 })
+  amount: number;
+
+  @Column({
+    type: 'enum',
+    enum: ['pending', 'completed', 'failed'],
+    default: 'pending',
+  })
+  paymentStatus: 'pending' | 'completed' | 'failed';
+
+  @Column()
+  paymentMethod: string;
+
+  @Column({ nullable: true })
+  transactionId: string;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+}
+
+@Entity('payment_methods')
+export class PaymentMethod {
+  @PrimaryGeneratedColumn('increment')
+  id: number;
+
+  @ManyToOne(() => Rider)
+  @JoinColumn({ name: 'riderId' })
+  rider: Rider;
+
+  @Column({
+    type: 'enum',
+    enum: ['credit_card', 'debit_card'],
+  })
+  methodType: 'credit_card' | 'debit_card';
+
+  @Column()
+  cardNumber: string;
+
+  @Column()
+  expiryDate: Date;
+
+  @Column({ default: false })
+  isDefault: boolean;
+
+  @Column({
+    type: 'enum',
+    enum: ['active', 'inactive'],
+    default: 'active',
+  })
+  status: 'active' | 'inactive';
 
   @CreateDateColumn()
   createdAt: Date;

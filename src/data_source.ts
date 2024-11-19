@@ -1,6 +1,9 @@
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { registerAs } from '@nestjs/config';
 
+import * as dotenv from 'dotenv';
+dotenv.config({ path: '.env.dev' });
+
 const config = <DataSourceOptions>{
   type: 'postgres',
   host: process.env.DB_HOST,
@@ -11,7 +14,7 @@ const config = <DataSourceOptions>{
   entities: [__dirname + '/entities.ts'],
 
   synchronize: false,
-  migrations: [__dirname + '../migrations/*.ts'],
+  migrations: [__dirname + '../../migrations/*.ts'],
 };
 
 export default registerAs('typeorm', () => config);
