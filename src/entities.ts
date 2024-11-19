@@ -1,4 +1,5 @@
 // src/entities/driver.entity.ts
+
 import {
   Entity,
   Column,
@@ -238,6 +239,117 @@ export class RideRequest extends BaseEntity {
   riderId: number;
   @Column()
   vehicleTypeId: number;
+
+  @Column('decimal', { precision: 10, scale: 2 })
+  estimatedFareWithoutSurge: number;
+
+  static async createRequest(
+    queryRunner: QueryRunner,
+    data: {
+      riderId: number;
+      vehicleTypeId: number;
+      pickupLocation: [number, number];
+      dropoffLocation: [number, number];
+      surgeMultiplier: number;
+    },
+  ): Promise<RideRequest> {
+    const vehicleType = await queryRunner.manager.findOneOrFail(VehicleType, {
+      where: { id: data.vehicleTypeId },
+    });
+    const distanceKm = await this.calculateDistance(
+      queryRunner,
+      data.pickupLocation,
+      data.dropoffLocation,
+    );
+
+    const { estimatedFare, estimatedFareWithoutSurge } =
+      await this.calculateEstimatedFare({
+        distanceKm: distanceKm,
+        vehicleType: vehicleType,
+        surgeMultiplier: data.surgeMultiplier,
+        queryRunner: queryRunner,
+      });
+
+    const { estimatedDuration, estimatedArrivalTime } =
+      this.calculateTimeEstimates(distanceKm);
+
+    const rideRequest = this.create({
+      riderId: data.riderId,
+      vehicleTypeId: data.vehicleTypeId,
+      pickupLocation: { type: 'Point', coordinates: data.pickupLocation },
+      dropoffLocation: { type: 'Point', coordinates: data.dropoffLocation },
+      status: 'pending',
+      requestTime: new Date(),
+      estimatedArrivalTime: estimatedArrivalTime,
+      estimatedFareWithoutSurge: estimatedFareWithoutSurge,
+      estimatedFare: estimatedFare,
+      estimatedDuration: estimatedDuration,
+      requestExpiryTime: new Date(Date.now() + 5 * 60000),
+    });
+
+    return queryRunner.manager.save(rideRequest);
+  }
+
+  private static async calculateEstimatedFare(request: {
+    distanceKm: number;
+    vehicleType: VehicleType;
+    surgeMultiplier: number;
+    queryRunner: QueryRunner;
+  }): Promise<{
+    estimatedFare: number;
+    estimatedFareWithoutSurge: number;
+  }> {
+    const { vehicleType, surgeMultiplier, distanceKm } = request;
+
+    const baseFare = Number(vehicleType.baseRate);
+    const distanceFare = distanceKm * Number(vehicleType.perKmRate);
+    const timeFare = distanceKm * 2 * Number(vehicleType.perMinuteRate);
+
+    return {
+      estimatedFare: (baseFare + distanceFare + timeFare) * surgeMultiplier,
+      estimatedFareWithoutSurge: baseFare + distanceFare + timeFare,
+    };
+  }
+
+  private static async calculateDistance(
+    queryRunner: QueryRunner,
+    pickupPoint: [number, number],
+    dropoffPoint: [number, number],
+  ): Promise<number> {
+    const result = await queryRunner.query(
+      `
+    SELECT ST_Distance(
+      ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
+      ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography
+    ) / 1000 as distance
+  `,
+      [pickupPoint[0], pickupPoint[1], dropoffPoint[0], dropoffPoint[1]],
+    );
+
+    return parseFloat(result[0].distance);
+  }
+  private static calculateTimeEstimates(distanceKm: number) {
+    // Assuming average speed of 40 km/h in city traffic
+    const averageSpeedKmh = 40;
+
+    // Calculate duration in minutes
+    const durationMinutes = Math.ceil((distanceKm / averageSpeedKmh) * 60);
+
+    // Format duration as interval string HH:MM:00
+    const hours = Math.floor(durationMinutes / 60);
+    const minutes = durationMinutes % 60;
+    const estimatedDuration = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`;
+
+    // Calculate estimated arrival (current time + duration)
+    const estimatedArrivalTime = new Date(
+      Date.now() + durationMinutes * 60 * 1000,
+    );
+
+    return {
+      estimatedDuration,
+      estimatedArrivalTime,
+    };
+  }
 }
 
 @Entity('ride_acceptance_statuses')
@@ -433,6 +545,28 @@ export class SurgeArea extends BaseEntity {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  static async getMultiplierForPoint(
+    point: [number, number],
+    queryRunner: QueryRunner,
+  ): Promise<number> {
+    const surgeArea = await queryRunner.manager
+      .createQueryBuilder(SurgeArea, 'surge')
+      .where(
+        `ST_Contains(
+          surge.area::geometry,
+          ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)
+        )`,
+        {
+          longitude: point[0],
+          latitude: point[1],
+        },
+      )
+      .andWhere('surge.status = :status', { status: 'active' })
+      .getOne();
+
+    return parseFloat(surgeArea?.multiplier as any) || 1;
+  }
 }
 
 @Entity('payments')

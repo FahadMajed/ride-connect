@@ -61,6 +61,7 @@ describe('Ride Requests (e2e)', () => {
             type: 'Point',
             coordinates: [55.2744, 25.2048], // Somewhere in Dubai
           },
+          vehicleTypeId: vehicleType.id,
         }),
         driverFactory({
           status: 'active',
@@ -69,6 +70,7 @@ describe('Ride Requests (e2e)', () => {
             type: 'Point',
             coordinates: [55.2754, 25.2058], // ~200m away
           },
+          vehicleTypeId: vehicleType.id,
         }),
         driverFactory({
           status: 'active',
@@ -77,6 +79,7 @@ describe('Ride Requests (e2e)', () => {
             type: 'Point',
             coordinates: [55.2764, 25.2068], // ~400m away
           },
+          vehicleTypeId: vehicleType.id,
         }),
       ];
 
@@ -87,6 +90,7 @@ describe('Ride Requests (e2e)', () => {
           type: 'Point',
           coordinates: [55.3744, 25.3048], // Somewhere else
         },
+        vehicleTypeId: vehicleType.id,
       });
 
       await Driver.save(nearbyDrivers);
@@ -159,6 +163,7 @@ describe('Ride Requests (e2e)', () => {
           type: 'Point',
           coordinates: [55.2744, 25.2048],
         },
+        vehicleTypeId: vehicleType.id,
       });
       await Driver.save(driver);
 
@@ -213,11 +218,11 @@ describe('Ride Requests (e2e)', () => {
         },
       });
 
-      expect(rideRequest.estimatedFare).toBeGreaterThan(
-        baseEstimate.estimatedFare * 1.7, // allowing some variance
+      expect(Number(rideRequest.estimatedFare)).toBeGreaterThan(
+        Number(baseEstimate.estimatedFareWithoutSurge) * 1.7, // allowing some variance
       );
-      expect(rideRequest.estimatedFare).toBeLessThan(
-        baseEstimate.estimatedFare * 1.9, // allowing some variance
+      expect(Number(rideRequest.estimatedFare)).toBeLessThan(
+        Number(baseEstimate.estimatedFareWithoutSurge) * 1.9, // allowing some variance
       );
     });
   });

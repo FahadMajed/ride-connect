@@ -4,7 +4,12 @@ import {
   Post,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { Driver, RideAcceptanceStatus, RideRequest } from './entities';
+import {
+  Driver,
+  RideAcceptanceStatus,
+  RideRequest,
+  SurgeArea,
+} from './entities';
 import { DataSource } from 'typeorm';
 
 @Controller('ride-requests')
@@ -27,21 +32,19 @@ export class RideRequestController {
     await queryRunner.startTransaction();
 
     try {
-      // 1. Create the ride request
-      const rideRequest = RideRequest.create({
+      //1. Create ride request with surge multiplier
+      const surgeMultiplier = await SurgeArea.getMultiplierForPoint(
+        request.pickupLocation,
+        queryRunner,
+      );
+
+      const rideRequest = await RideRequest.createRequest(queryRunner, {
         riderId: request.riderId,
+
         vehicleTypeId: request.vehicleTypeId,
-        pickupLocation: { type: 'Point', coordinates: request.pickupLocation },
-        dropoffLocation: {
-          type: 'Point',
-          coordinates: request.dropoffLocation,
-        },
-        status: 'pending',
-        requestTime: new Date(),
-        estimatedFare: 0,
-        estimatedArrivalTime: new Date(Date.now() + 10 * 60000),
-        estimatedDuration: '00:30:00',
-        requestExpiryTime: new Date(Date.now() + 5 * 60000),
+        pickupLocation: request.pickupLocation,
+        dropoffLocation: request.dropoffLocation,
+        surgeMultiplier: surgeMultiplier,
       });
 
       await queryRunner.manager.save(rideRequest);
@@ -56,7 +59,7 @@ export class RideRequestController {
         throw new UnprocessableEntityException('No nearby drivers available');
       }
 
-      // 3. Create ride acceptance requests for each driver
+      // 3. Create ride acceptance requests for each nearby driver
       const acceptances = nearbyDrivers.map((driverId) =>
         RideAcceptanceStatus.create({
           driverId: driverId,
