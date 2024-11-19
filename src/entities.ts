@@ -1,5 +1,6 @@
 // src/entities/driver.entity.ts
 
+import { UnprocessableEntityException } from '@nestjs/common';
 import {
   Entity,
   Column,
@@ -386,6 +387,42 @@ export class RideAcceptanceStatus extends BaseEntity {
 
   @Column()
   rideRequestId: number;
+
+  static async acceptRideRequest(
+    requestId: number,
+    driverId: number,
+    queryRunner: QueryRunner,
+  ): Promise<RideAcceptanceStatus> {
+    // Get the acceptance with pessimistic lock
+    const acceptance = await queryRunner.manager
+      .createQueryBuilder(RideAcceptanceStatus, 'acceptance')
+      .setLock('pessimistic_write_or_fail')
+      .innerJoinAndSelect('acceptance.rideRequest', 'request')
+      .where('acceptance.rideRequestId = :requestId', { requestId })
+      .andWhere('acceptance.driverId = :driverId', { driverId })
+      .andWhere('acceptance.status = :status', { status: 'pending' })
+      .getOne();
+
+    if (!acceptance) {
+      throw new UnprocessableEntityException('Ride request not available');
+    }
+
+    // Mark this acceptance as accepted
+    acceptance.status = 'accepted';
+    acceptance.responseTime = new Date();
+    await queryRunner.manager.save(acceptance);
+
+    // Mark other acceptances as rejected
+    await queryRunner.manager
+      .createQueryBuilder()
+      .update(RideAcceptanceStatus)
+      .set({ status: 'rejected', responseTime: new Date() })
+      .where('rideRequestId = :requestId', { requestId })
+      .andWhere('id != :acceptanceId', { acceptanceId: acceptance.id })
+      .execute();
+
+    return acceptance;
+  }
 }
 
 @Entity('rides')
@@ -400,26 +437,6 @@ export class Ride extends BaseEntity {
   @ManyToOne(() => Driver)
   @JoinColumn({ name: 'driverId' })
   driver: Driver;
-
-  @ManyToOne(() => Rider)
-  @JoinColumn({ name: 'riderId' })
-  rider: Rider;
-
-  @ManyToOne(() => VehicleType)
-  @JoinColumn({ name: 'vehicleTypeId' })
-  vehicleType: VehicleType;
-
-  @Column('geography', {
-    spatialFeatureType: 'Point',
-    srid: 4326,
-  })
-  pickupLocation: any;
-
-  @Column('geography', {
-    spatialFeatureType: 'Point',
-    srid: 4326,
-  })
-  dropoffLocation: any;
 
   @Column('geography', {
     spatialFeatureType: 'Point',
@@ -440,21 +457,6 @@ export class Ride extends BaseEntity {
 
   @Column({ nullable: true })
   endTime: Date;
-
-  @Column()
-  estimatedArrivalTime: Date;
-
-  @Column('decimal', { precision: 10, scale: 2 })
-  distance: number;
-
-  @Column('interval')
-  duration: string;
-
-  @Column('decimal', { precision: 10, scale: 2 })
-  baseFare: number;
-
-  @Column('decimal', { precision: 10, scale: 2 })
-  finalFare: number;
 
   @Column({
     type: 'enum',
@@ -478,8 +480,23 @@ export class Ride extends BaseEntity {
 
   @UpdateDateColumn()
   updatedAt: Date;
-}
 
+  static async createFromRequest(
+    queryRunner: QueryRunner,
+    driverId: number,
+    rideRequest: RideRequest,
+  ): Promise<Ride> {
+    const ride = this.create({
+      request: rideRequest,
+
+      driver: { id: driverId },
+      startTime: new Date(),
+      status: 'in_progress',
+    });
+
+    return queryRunner.manager.save(ride);
+  }
+}
 @Entity('ratings')
 export class Rating extends BaseEntity {
   @PrimaryGeneratedColumn('increment')

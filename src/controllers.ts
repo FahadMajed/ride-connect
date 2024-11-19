@@ -1,11 +1,14 @@
 import {
   Body,
   Controller,
+  Param,
+  ParseIntPipe,
   Post,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import {
   Driver,
+  Ride,
   RideAcceptanceStatus,
   RideRequest,
   SurgeArea,
@@ -77,6 +80,38 @@ export class RideRequestController {
         where: { id: rideRequest.id },
         relations: ['rider', 'vehicleType'],
       });
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  @Post(':id/accept')
+  async acceptRide(
+    @Param('id', ParseIntPipe) requestId: number,
+    @Body() request: { driverId: number },
+  ) {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const acceptance = await RideAcceptanceStatus.acceptRideRequest(
+        requestId,
+        request.driverId,
+        queryRunner,
+      );
+
+      const ride = await Ride.createFromRequest(
+        queryRunner,
+        request.driverId,
+        acceptance.rideRequest,
+      );
+
+      await queryRunner.commitTransaction();
+      return ride;
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;

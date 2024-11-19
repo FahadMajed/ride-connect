@@ -133,23 +133,11 @@ export const rideAcceptanceStatusFactory = (
 });
 
 export const rideFactory = (overrides?: Partial<Ride>): Partial<Ride> => ({
-  pickupLocation: createRandomPoint(),
-  dropoffLocation: createRandomPoint(),
   currentLocation: createRandomPoint(),
   routeTaken: createRandomLineString(),
   startTime: faker.date.past(),
   endTime: faker.date.future(),
-  estimatedArrivalTime: faker.date.future(),
-  distance: parseFloat(
-    faker.number.float({ min: 1, max: 50, fractionDigits: 1 }).toFixed(2),
-  ),
-  duration: '00:45:00', // 45 minutes as default
-  baseFare: parseFloat(
-    faker.number.float({ min: 10, max: 50, fractionDigits: 1 }).toFixed(2),
-  ),
-  finalFare: parseFloat(
-    faker.number.float({ min: 10, max: 100, fractionDigits: 1 }).toFixed(2),
-  ),
+
   status: faker.helpers.arrayElement(['in_progress', 'completed', 'cancelled']),
   cancellationReason: faker.helpers.maybe(() => faker.lorem.sentence()),
   cancelledBy: faker.helpers.maybe(() =>

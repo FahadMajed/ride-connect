@@ -5,13 +5,14 @@ import { AppModule } from '../src/modules';
 import { driverFactory, riderFactory, vehicleTypeFactory } from './factory';
 import {
   Driver,
+  Ride,
   RideAcceptanceStatus,
   Rider,
   RideRequest,
   SurgeArea,
   VehicleType,
 } from 'src/entities';
-import { DataSource } from 'typeorm';
+import { DataSource, Not } from 'typeorm';
 
 describe('Ride Requests (e2e)', () => {
   let app: INestApplication;
@@ -224,6 +225,95 @@ describe('Ride Requests (e2e)', () => {
       expect(Number(rideRequest.estimatedFare)).toBeLessThan(
         Number(baseEstimate.estimatedFareWithoutSurge) * 1.9, // allowing some variance
       );
+    });
+  });
+
+  describe('(POST) /ride-requests/:id/accept', () => {
+    test('should successfully accept a ride request and create a ride', async () => {
+      // 1. Setup test data
+      const rider = riderFactory({
+        status: 'active',
+      });
+      await Rider.save(rider);
+
+      const vehicleType = vehicleTypeFactory({
+        typeName: 'economy',
+      });
+      await VehicleType.save(vehicleType);
+
+      const driver = driverFactory({
+        status: 'active',
+        availabilityStatus: 'online',
+        currentLocation: {
+          type: 'Point',
+          coordinates: [55.2744, 25.2048],
+        },
+        vehicleTypeId: vehicleType.id,
+      });
+      await Driver.save(driver);
+
+      // 2. Create initial ride request
+      const createResponse = await request(app.getHttpServer())
+        .post('/ride-requests')
+        .send({
+          riderId: rider.id,
+          vehicleTypeId: vehicleType.id,
+          pickupLocation: [55.2744, 25.2048],
+          dropoffLocation: [55.3744, 25.3048],
+        });
+
+      // 3. Accept the ride request
+      //get the ride acceptance status to get the driver id
+      const acceptanceRequest = await RideAcceptanceStatus.findOne({
+        where: { driverId: driver.id },
+        relations: ['driver'],
+      });
+
+      expect(acceptanceRequest.driverId).toEqual(driver.id);
+
+      const acceptResponse = await request(app.getHttpServer())
+        .post(`/ride-requests/${acceptanceRequest.rideRequestId}/accept`)
+        .send({
+          driverId: driver.id,
+        });
+
+      // 4. Verify response
+      expect(acceptResponse.status).toBe(201);
+      expect(acceptResponse.body).toHaveProperty('id');
+      expect(acceptResponse.body.status).toBe('in_progress');
+      expect(acceptResponse.body.driver.id).toBe(driver.id);
+
+      // 5. Verify database state
+      // Check ride acceptance status
+      const acceptance = await RideAcceptanceStatus.findOne({
+        where: {
+          rideRequestId: createResponse.body.id,
+          driverId: driver.id,
+        },
+      });
+      expect(acceptance.status).toBe('accepted');
+
+      // Check ride was created
+      const ride = await Ride.findOne({
+        where: { id: acceptResponse.body.id },
+        relations: ['driver', 'request'],
+      });
+      expect(ride).toBeDefined();
+      expect(ride.status).toBe('in_progress');
+      expect(ride.driver.id).toBe(driver.id);
+      expect(ride.request.id).toBe(createResponse.body.id);
+      expect(ride.startTime).toBeDefined();
+
+      // Check other drivers' acceptance statuses were rejected
+      const otherAcceptances = await RideAcceptanceStatus.find({
+        where: {
+          rideRequestId: createResponse.body.id,
+          driverId: Not(driver.id),
+        },
+      });
+      otherAcceptances.forEach((acceptance) => {
+        expect(acceptance.status).toBe('rejected');
+      });
     });
   });
 });
