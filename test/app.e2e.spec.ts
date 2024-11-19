@@ -315,5 +315,99 @@ describe('Ride Requests (e2e)', () => {
         expect(acceptance.status).toBe('rejected');
       });
     });
+
+    test('should prevent multiple drivers from accepting the same request', async () => {
+      // 1. Setup test data
+      const rider = riderFactory({
+        status: 'active',
+      });
+      await Rider.save(rider);
+
+      const vehicleType = vehicleTypeFactory({
+        typeName: 'economy',
+      });
+      await VehicleType.save(vehicleType);
+
+      // Create two drivers
+      const driver1 = driverFactory({
+        status: 'active',
+        availabilityStatus: 'online',
+        currentLocation: {
+          type: 'Point',
+          coordinates: [55.2744, 25.2048],
+        },
+        vehicleTypeId: vehicleType.id,
+      });
+
+      const driver2 = driverFactory({
+        status: 'active',
+        availabilityStatus: 'online',
+        currentLocation: {
+          type: 'Point',
+          coordinates: [55.2745, 25.2049], // Slightly different location
+        },
+        vehicleTypeId: vehicleType.id,
+      });
+
+      await Driver.save([driver1, driver2]);
+
+      // 2. Create ride request
+      const createResponse = await request(app.getHttpServer())
+        .post('/ride-requests')
+        .send({
+          riderId: rider.id,
+          vehicleTypeId: vehicleType.id,
+          pickupLocation: [55.2744, 25.2048],
+          dropoffLocation: [55.3744, 25.3048],
+        });
+
+      // 3. First driver accepts the request
+      const firstAcceptResponse = await request(app.getHttpServer())
+        .post(`/ride-requests/${createResponse.body.id}/accept`)
+        .send({
+          driverId: driver1.id,
+        });
+
+      expect(firstAcceptResponse.status).toBe(201);
+
+      // 4. Second driver attempts to accept the same request
+      const secondAcceptResponse = await request(app.getHttpServer())
+        .post(`/ride-requests/${createResponse.body.id}/accept`)
+        .send({
+          driverId: driver2.id,
+        });
+
+      // 5. Verify the second attempt fails
+      expect(secondAcceptResponse.status).toBe(422);
+
+      // 6. Verify database state
+      // Check first driver's acceptance is still valid
+      const firstDriverAcceptance = await RideAcceptanceStatus.findOne({
+        where: {
+          rideRequestId: createResponse.body.id,
+          driverId: driver1.id,
+        },
+      });
+      expect(firstDriverAcceptance.status).toBe('accepted');
+
+      // Check second driver's acceptance was rejected
+      const secondDriverAcceptance = await RideAcceptanceStatus.findOne({
+        where: {
+          rideRequestId: createResponse.body.id,
+          driverId: driver2.id,
+        },
+      });
+      expect(secondDriverAcceptance.status).toBe('rejected');
+
+      // Verify only one ride was created
+      const rides = await Ride.find({
+        where: {
+          request: { id: createResponse.body.id },
+        },
+        relations: ['driver'],
+      });
+      expect(rides).toHaveLength(1);
+      expect(rides[0].driver.id).toBe(driver1.id);
+    });
   });
 });
