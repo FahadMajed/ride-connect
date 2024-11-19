@@ -13,6 +13,66 @@ import {
   QueryRunner,
 } from 'typeorm';
 
+@Entity('riders')
+export class Rider extends BaseEntity {
+  @PrimaryGeneratedColumn('increment')
+  id: number;
+
+  @Column()
+  name: string;
+
+  @Column({ unique: true })
+  email: string;
+
+  @Column()
+  phone: string;
+
+  @Column({
+    type: 'enum',
+    enum: ['active', 'inactive', 'suspended'],
+    default: 'active',
+  })
+  status: 'active' | 'inactive' | 'suspended';
+
+  @Column('decimal', { precision: 2, scale: 1, default: 0 })
+  averageRating: number;
+
+  @Column({ nullable: true })
+  preferredPaymentMethod: string;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+}
+
+@Entity('vehicle_types')
+export class VehicleType extends BaseEntity {
+  @PrimaryGeneratedColumn('increment')
+  id: number;
+
+  @Column({
+    type: 'enum',
+    enum: ['economy', 'premium', 'family'],
+  })
+  typeName: 'economy' | 'premium' | 'family';
+
+  @Column('decimal', { precision: 10, scale: 2 })
+  baseRate: number;
+
+  @Column('decimal', { precision: 10, scale: 2 })
+  perKmRate: number;
+
+  @Column('decimal', { precision: 10, scale: 2 })
+  perMinuteRate: number;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+}
 @Entity('drivers')
 export class Driver extends BaseEntity {
   @PrimaryGeneratedColumn('increment')
@@ -51,6 +111,13 @@ export class Driver extends BaseEntity {
 
   @Column()
   driverLicenseNumber: string;
+
+  @ManyToOne(() => VehicleType)
+  @JoinColumn({ name: 'vehicleTypeId' })
+  vehicleType: VehicleType;
+
+  @Column()
+  vehicleTypeId: number;
 
   @Column({
     type: 'enum',
@@ -112,67 +179,6 @@ export class Driver extends BaseEntity {
 
     return results.map((row) => row.driver_id);
   }
-}
-
-@Entity('riders')
-export class Rider extends BaseEntity {
-  @PrimaryGeneratedColumn('increment')
-  id: number;
-
-  @Column()
-  name: string;
-
-  @Column({ unique: true })
-  email: string;
-
-  @Column()
-  phone: string;
-
-  @Column({
-    type: 'enum',
-    enum: ['active', 'inactive', 'suspended'],
-    default: 'active',
-  })
-  status: 'active' | 'inactive' | 'suspended';
-
-  @Column('decimal', { precision: 2, scale: 1, default: 0 })
-  averageRating: number;
-
-  @Column({ nullable: true })
-  preferredPaymentMethod: string;
-
-  @CreateDateColumn()
-  createdAt: Date;
-
-  @UpdateDateColumn()
-  updatedAt: Date;
-}
-
-@Entity('vehicle_types')
-export class VehicleType extends BaseEntity {
-  @PrimaryGeneratedColumn('increment')
-  id: number;
-
-  @Column({
-    type: 'enum',
-    enum: ['economy', 'premium', 'family'],
-  })
-  typeName: 'economy' | 'premium' | 'family';
-
-  @Column('decimal', { precision: 10, scale: 2 })
-  baseRate: number;
-
-  @Column('decimal', { precision: 10, scale: 2 })
-  perKmRate: number;
-
-  @Column('decimal', { precision: 10, scale: 2 })
-  perMinuteRate: number;
-
-  @CreateDateColumn()
-  createdAt: Date;
-
-  @UpdateDateColumn()
-  updatedAt: Date;
 }
 
 @Entity('ride_requests')
@@ -399,7 +405,7 @@ export class Rating extends BaseEntity {
 }
 
 @Entity('surge_areas')
-export class SurgeArea {
+export class SurgeArea extends BaseEntity {
   @PrimaryGeneratedColumn('increment')
   id: number;
 
