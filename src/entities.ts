@@ -7,10 +7,10 @@ import {
   UpdateDateColumn,
   JoinColumn,
   ManyToOne,
-  Point,
   BaseEntity,
   Polygon,
   LineString,
+  QueryRunner,
 } from 'typeorm';
 
 @Entity('drivers')
@@ -64,16 +64,55 @@ export class Driver extends BaseEntity {
     srid: 4326,
     nullable: true,
   })
-  currentLocation: Point;
+  currentLocation: any;
 
   @CreateDateColumn()
   createdAt: Date;
 
   @UpdateDateColumn()
   updatedAt: Date;
-}
 
-// src/entities/rider.entity.ts
+  static async findNearbyDriversIds(
+    pickupLocation: [number, number],
+    queryRunner?: QueryRunner,
+  ): Promise<number[]> {
+    const query = Driver.createQueryBuilder('driver')
+      .select('driver.id')
+      .addSelect(`ST_AsGeoJSON(driver.currentLocation)`, 'location')
+      .where('driver.status = :status', { status: 'active' })
+      .andWhere('driver.availabilityStatus = :availabilityStatus', {
+        availabilityStatus: 'online',
+      })
+      .andWhere(
+        `ST_DWithin(
+                    driver."currentLocation"::geography,
+                    ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography,
+                    :distance
+                )`,
+        {
+          longitude: pickupLocation[0],
+          latitude: pickupLocation[1],
+          distance: 5000, // 5km in meters
+        },
+      )
+      .orderBy(
+        `ST_Distance(
+                    driver."currentLocation"::geography,
+                    ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography
+                )`,
+      )
+      .limit(5);
+
+    // If queryRunner is provided, use it
+    if (queryRunner) {
+      query.setQueryRunner(queryRunner);
+    }
+
+    const results = await query.getRawMany();
+
+    return results.map((row) => row.driver_id);
+  }
+}
 
 @Entity('riders')
 export class Rider extends BaseEntity {
@@ -149,13 +188,13 @@ export class RideRequest extends BaseEntity {
     spatialFeatureType: 'Point',
     srid: 4326,
   })
-  pickupLocation: Point;
+  pickupLocation: any;
 
   @Column('geometry', {
     spatialFeatureType: 'Point',
     srid: 4326,
   })
-  dropoffLocation: Point;
+  dropoffLocation: any;
 
   @ManyToOne(() => VehicleType)
   @JoinColumn({ name: 'vehicleTypeId' })
@@ -188,6 +227,11 @@ export class RideRequest extends BaseEntity {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @Column()
+  riderId: number;
+  @Column()
+  vehicleTypeId: number;
 }
 
 @Entity('ride_acceptance_statuses')
@@ -218,6 +262,12 @@ export class RideAcceptanceStatus extends BaseEntity {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @Column()
+  driverId: number;
+
+  @Column()
+  rideRequestId: number;
 }
 
 @Entity('rides')
@@ -245,20 +295,20 @@ export class Ride extends BaseEntity {
     spatialFeatureType: 'Point',
     srid: 4326,
   })
-  pickupLocation: Point;
+  pickupLocation: any;
 
   @Column('geography', {
     spatialFeatureType: 'Point',
     srid: 4326,
   })
-  dropoffLocation: Point;
+  dropoffLocation: any;
 
   @Column('geography', {
     spatialFeatureType: 'Point',
     srid: 4326,
     nullable: true,
   })
-  currentLocation: Point;
+  currentLocation: any;
 
   @Column('geography', {
     spatialFeatureType: 'LineString',
