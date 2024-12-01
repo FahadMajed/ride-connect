@@ -6,13 +6,7 @@ import {
   Post,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import {
-  Driver,
-  Ride,
-  RideAcceptanceStatus,
-  RideRequest,
-  SurgeArea,
-} from './entities';
+import { Driver, Ride, RideOffer, RideRequest, SurgeArea } from './entities';
 import { DataSource } from 'typeorm';
 
 @Controller('ride-requests')
@@ -26,7 +20,6 @@ export class RideRequestController {
       riderId: number;
       pickupLocation: [number, number];
       dropoffLocation: [number, number];
-
       vehicleTypeId: number;
     },
   ) {
@@ -41,9 +34,10 @@ export class RideRequestController {
         queryRunner,
       );
 
+      // 1.5 Create ride request, the fare will be calculated in the RideRequest.createRequest method
+      // then the ride request will be saved to the database
       const rideRequest = await RideRequest.createRequest(queryRunner, {
         riderId: request.riderId,
-
         vehicleTypeId: request.vehicleTypeId,
         pickupLocation: request.pickupLocation,
         dropoffLocation: request.dropoffLocation,
@@ -63,23 +57,17 @@ export class RideRequestController {
       }
 
       // 3. Create ride acceptance requests for each nearby driver
-      const acceptances = nearbyDrivers.map((driverId) =>
-        RideAcceptanceStatus.create({
-          driverId: driverId,
-          rideRequestId: rideRequest.id,
-          status: 'pending',
-          responseTime: new Date(),
-        }),
-      );
 
-      await queryRunner.manager.save(acceptances);
+      RideOffer.createRideOffers(nearbyDrivers, rideRequest, queryRunner);
+
       await queryRunner.commitTransaction();
 
-      // 4. Return ride request with relations
-      return RideRequest.findOne({
-        where: { id: rideRequest.id },
-        relations: ['rider', 'vehicleType'],
-      });
+      // 4. Return ride request id
+      return {
+        rideRequestId: rideRequest.id,
+        estimatedFare: rideRequest.estimatedFare,
+        estimatedArrivalTime: rideRequest.estimatedArrivalTime,
+      };
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -98,7 +86,7 @@ export class RideRequestController {
     await queryRunner.startTransaction();
 
     try {
-      const acceptance = await RideAcceptanceStatus.acceptRideRequest(
+      const acceptance = await RideOffer.acceptOffer(
         requestId,
         request.driverId,
         queryRunner,

@@ -89,12 +89,8 @@ export class Driver extends BaseEntity {
   @Column()
   phone: string;
 
-  @Column({
-    type: 'enum',
-    enum: ['active', 'inactive', 'suspended'],
-    default: 'active',
-  })
-  status: 'active' | 'inactive' | 'suspended';
+  @Column('bool')
+  isActive: boolean;
 
   @Column('decimal', { precision: 2, scale: 1, default: 0 })
   averageRating: number;
@@ -121,12 +117,8 @@ export class Driver extends BaseEntity {
   @Column()
   vehicleTypeId: number;
 
-  @Column({
-    type: 'enum',
-    enum: ['online', 'offline'],
-    default: 'offline',
-  })
-  availabilityStatus: 'online' | 'offline';
+  @Column('bool')
+  isAvailable: boolean;
 
   @Column('geometry', {
     spatialFeatureType: 'Point',
@@ -148,10 +140,9 @@ export class Driver extends BaseEntity {
     const query = Driver.createQueryBuilder('driver')
       .select('driver.id')
       .addSelect(`ST_AsGeoJSON(driver.currentLocation)`, 'location')
-      .where('driver.status = :status', { status: 'active' })
-      .andWhere('driver.availabilityStatus = :availabilityStatus', {
-        availabilityStatus: 'online',
-      })
+      .where('driver.isActive = :isActive', { isActive: true })
+      .andWhere('driver.isAvailable = :isAvailable', { isAvailable: true })
+
       .andWhere(
         `ST_DWithin(
                     driver."currentLocation"::geography,
@@ -257,6 +248,7 @@ export class RideRequest extends BaseEntity {
     const vehicleType = await queryRunner.manager.findOneOrFail(VehicleType, {
       where: { id: data.vehicleTypeId },
     });
+
     const distanceKm = await this.calculateDistance(
       queryRunner,
       data.pickupLocation,
@@ -353,8 +345,8 @@ export class RideRequest extends BaseEntity {
   }
 }
 
-@Entity('ride_acceptance_statuses')
-export class RideAcceptanceStatus extends BaseEntity {
+@Entity('ride_offers')
+export class RideOffer extends BaseEntity {
   @PrimaryGeneratedColumn('increment')
   id: number;
 
@@ -373,9 +365,6 @@ export class RideAcceptanceStatus extends BaseEntity {
   })
   status: 'pending' | 'accepted' | 'rejected';
 
-  @Column()
-  responseTime: Date;
-
   @CreateDateColumn()
   createdAt: Date;
 
@@ -388,40 +377,56 @@ export class RideAcceptanceStatus extends BaseEntity {
   @Column()
   rideRequestId: number;
 
-  static async acceptRideRequest(
+  static createRideOffers(
+    nearbyDrivers: number[],
+    rideRequest: RideRequest,
+    queryRunner: QueryRunner,
+  ) {
+    const offers = nearbyDrivers.map((driverId) => {
+      return this.create({
+        driverId,
+        rideRequestId: rideRequest.id,
+        status: 'pending',
+      });
+    });
+
+    return queryRunner.manager.save(offers);
+  }
+
+  static async acceptOffer(
     requestId: number,
     driverId: number,
     queryRunner: QueryRunner,
-  ): Promise<RideAcceptanceStatus> {
+  ): Promise<RideOffer> {
     // Get the acceptance with pessimistic lock
-    const acceptance = await queryRunner.manager
-      .createQueryBuilder(RideAcceptanceStatus, 'acceptance')
+    const offer = await queryRunner.manager
+      .createQueryBuilder(RideOffer, 'acceptance')
       .setLock('pessimistic_write_or_fail')
-      .innerJoinAndSelect('acceptance.rideRequest', 'request')
-      .where('acceptance.rideRequestId = :requestId', { requestId })
-      .andWhere('acceptance.driverId = :driverId', { driverId })
-      .andWhere('acceptance.status = :status', { status: 'pending' })
+      .innerJoinAndSelect('offer.rideRequest', 'request')
+      .where('offer.rideRequestId = :requestId', { requestId })
+      .andWhere('offer.driverId = :driverId', { driverId })
+      .andWhere('offer.status = :status', { status: 'pending' })
       .getOne();
 
-    if (!acceptance) {
+    if (!offer) {
       throw new UnprocessableEntityException('Ride request not available');
     }
 
-    // Mark this acceptance as accepted
-    acceptance.status = 'accepted';
-    acceptance.responseTime = new Date();
-    await queryRunner.manager.save(acceptance);
+    // Mark this offer as accepted
+    offer.status = 'accepted';
 
-    // Mark other acceptances as rejected
+    await queryRunner.manager.save(offer);
+
+    // Mark other offers as rejected
     await queryRunner.manager
       .createQueryBuilder()
-      .update(RideAcceptanceStatus)
+      .update(RideOffer)
       .set({ status: 'rejected', responseTime: new Date() })
       .where('rideRequestId = :requestId', { requestId })
-      .andWhere('id != :acceptanceId', { acceptanceId: acceptance.id })
+      .andWhere('id != :offerId', { offerId: offer.id })
       .execute();
 
-    return acceptance;
+    return offer;
   }
 }
 

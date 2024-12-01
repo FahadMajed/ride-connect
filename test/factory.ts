@@ -5,7 +5,7 @@ import {
   PaymentMethod,
   Rating,
   Ride,
-  RideAcceptanceStatus,
+  RideOffer,
   Rider,
   RideRequest,
   SurgeArea,
@@ -48,7 +48,8 @@ export const driverFactory = (
   name: faker.person.fullName(),
   email: faker.internet.email(),
   phone: faker.phone.number(),
-  status: faker.helpers.arrayElement(['active', 'inactive', 'suspended']),
+  isActive: true,
+  isAvailable: true,
   averageRating: parseFloat(
     faker.number.float({ min: 0, max: 5, fractionDigits: 1 }).toFixed(1),
   ),
@@ -57,7 +58,6 @@ export const driverFactory = (
   vehicleColor: faker.vehicle.color(),
   plateNumber: faker.vehicle.vrm(),
   driverLicenseNumber: faker.string.alphanumeric(10).toUpperCase(),
-  availabilityStatus: faker.helpers.arrayElement(['online', 'offline']),
   currentLocation: createRandomPoint(),
   createdAt: faker.date.past(),
   updatedAt: faker.date.recent(),
@@ -123,8 +123,8 @@ export const rideRequestFactory = (
 });
 
 export const rideAcceptanceStatusFactory = (
-  overrides?: Partial<RideAcceptanceStatus>,
-): Partial<RideAcceptanceStatus> => ({
+  overrides?: Partial<RideOffer>,
+): Partial<RideOffer> => ({
   status: faker.helpers.arrayElement(['pending', 'accepted', 'rejected']),
   responseTime: faker.date.recent(),
   createdAt: faker.date.past(),
