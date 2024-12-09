@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { Driver, Ride, RideOffer, RideRequest } from './entities';
 import { DataSource } from 'typeorm';
-import { LocationService, Pricer } from './services';
+import { TimeEstimator, Pricer } from './services';
 
 @Controller('ride-requests')
 export class RideRequestController {
@@ -32,7 +32,7 @@ export class RideRequestController {
       //1. Calculate the estimated fare
 
       const { distanceKm, estimatedDurationInMinutes, estimatedArrivalTime } =
-        await LocationService.calculateTimeEstimates(
+        await TimeEstimator.calculateTimeEstimates(
           request.pickupLocation,
           request.dropoffLocation,
         );

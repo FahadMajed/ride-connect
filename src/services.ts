@@ -67,7 +67,7 @@ export class Pricer {
   }
 }
 
-export class LocationService {
+export class TimeEstimator {
   static async calculateTimeEstimates(
     pickUpLocation: [number, number],
     dropoffLocation: [number, number],

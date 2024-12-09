@@ -15,7 +15,7 @@ import {
   VehicleType,
 } from 'src/entities';
 import { DataSource, Not } from 'typeorm';
-import { LocationService } from 'src/services';
+import { TimeEstimator } from 'src/services';
 
 describe('Ride Requests (e2e)', () => {
   let app: INestApplication;
@@ -65,7 +65,7 @@ describe('Ride Requests (e2e)', () => {
     // );
     // }
 
-    jest.spyOn(LocationService, 'calculateTimeEstimates').mockResolvedValue({
+    jest.spyOn(TimeEstimator, 'calculateTimeEstimates').mockResolvedValue({
       estimatedDurationInMinutes: 20,
       estimatedArrivalTime: new Date(),
       distanceKm: 10,
