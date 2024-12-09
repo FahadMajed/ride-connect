@@ -215,8 +215,8 @@ export class RideRequest extends BaseEntity {
   @Column()
   estimatedArrivalTime: Date;
 
-  @Column('interval')
-  estimatedDuration: string;
+  @Column('int', { nullable: true })
+  estimatedDurationInMinutes: number;
 
   @Column()
   requestExpiryTime: Date;
@@ -237,111 +237,33 @@ export class RideRequest extends BaseEntity {
 
   static async createRequest(
     queryRunner: QueryRunner,
-    data: {
+    request: {
       riderId: number;
       vehicleTypeId: number;
       pickupLocation: [number, number];
       dropoffLocation: [number, number];
-      surgeMultiplier: number;
+      estimatedArrivalTime: Date;
+      estimatedFareWithoutSurge: number;
+      estimatedFare: number;
+      estimatedDurationInMinutes: number;
     },
   ): Promise<RideRequest> {
-    const vehicleType = await queryRunner.manager.findOneOrFail(VehicleType, {
-      where: { id: data.vehicleTypeId },
-    });
-
-    const distanceKm = await this.calculateDistance(
-      queryRunner,
-      data.pickupLocation,
-      data.dropoffLocation,
-    );
-
-    const { estimatedFare, estimatedFareWithoutSurge } =
-      await this.calculateEstimatedFare({
-        distanceKm: distanceKm,
-        vehicleType: vehicleType,
-        surgeMultiplier: data.surgeMultiplier,
-        queryRunner: queryRunner,
-      });
-
-    const { estimatedDuration, estimatedArrivalTime } =
-      this.calculateTimeEstimates(distanceKm);
-
     const rideRequest = this.create({
-      riderId: data.riderId,
-      vehicleTypeId: data.vehicleTypeId,
-      pickupLocation: { type: 'Point', coordinates: data.pickupLocation },
-      dropoffLocation: { type: 'Point', coordinates: data.dropoffLocation },
+      riderId: request.riderId,
+      vehicleTypeId: request.vehicleTypeId,
+
+      pickupLocation: { type: 'Point', coordinates: request.pickupLocation },
+      dropoffLocation: { type: 'Point', coordinates: request.dropoffLocation },
       status: 'pending',
       requestTime: new Date(),
-      estimatedArrivalTime: estimatedArrivalTime,
-      estimatedFareWithoutSurge: estimatedFareWithoutSurge,
-      estimatedFare: estimatedFare,
-      estimatedDuration: estimatedDuration,
+      estimatedArrivalTime: request.estimatedArrivalTime,
+      estimatedFareWithoutSurge: request.estimatedFareWithoutSurge,
+      estimatedFare: request.estimatedFare,
+      estimatedDurationInMinutes: request.estimatedDurationInMinutes,
       requestExpiryTime: new Date(Date.now() + 5 * 60000),
     });
 
     return queryRunner.manager.save(rideRequest);
-  }
-
-  private static async calculateEstimatedFare(request: {
-    distanceKm: number;
-    vehicleType: VehicleType;
-    surgeMultiplier: number;
-    queryRunner: QueryRunner;
-  }): Promise<{
-    estimatedFare: number;
-    estimatedFareWithoutSurge: number;
-  }> {
-    const { vehicleType, surgeMultiplier, distanceKm } = request;
-
-    const baseFare = Number(vehicleType.baseRate);
-    const distanceFare = distanceKm * Number(vehicleType.perKmRate);
-    const timeFare = distanceKm * 2 * Number(vehicleType.perMinuteRate);
-
-    return {
-      estimatedFare: (baseFare + distanceFare + timeFare) * surgeMultiplier,
-      estimatedFareWithoutSurge: baseFare + distanceFare + timeFare,
-    };
-  }
-
-  private static async calculateDistance(
-    queryRunner: QueryRunner,
-    pickupPoint: [number, number],
-    dropoffPoint: [number, number],
-  ): Promise<number> {
-    const result = await queryRunner.query(
-      `
-    SELECT ST_Distance(
-      ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
-      ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography
-    ) / 1000 as distance
-  `,
-      [pickupPoint[0], pickupPoint[1], dropoffPoint[0], dropoffPoint[1]],
-    );
-
-    return parseFloat(result[0].distance);
-  }
-  private static calculateTimeEstimates(distanceKm: number) {
-    // Assuming average speed of 40 km/h in city traffic
-    const averageSpeedKmh = 40;
-
-    // Calculate duration in minutes
-    const durationMinutes = Math.ceil((distanceKm / averageSpeedKmh) * 60);
-
-    // Format duration as interval string HH:MM:00
-    const hours = Math.floor(durationMinutes / 60);
-    const minutes = durationMinutes % 60;
-    const estimatedDuration = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:00`;
-
-    // Calculate estimated arrival (current time + duration)
-    const estimatedArrivalTime = new Date(
-      Date.now() + durationMinutes * 60 * 1000,
-    );
-
-    return {
-      estimatedDuration,
-      estimatedArrivalTime,
-    };
   }
 }
 
@@ -400,7 +322,7 @@ export class RideOffer extends BaseEntity {
   ): Promise<RideOffer> {
     // Get the acceptance with pessimistic lock
     const offer = await queryRunner.manager
-      .createQueryBuilder(RideOffer, 'acceptance')
+      .createQueryBuilder(RideOffer, 'offer')
       .setLock('pessimistic_write_or_fail')
       .innerJoinAndSelect('offer.rideRequest', 'request')
       .where('offer.rideRequestId = :requestId', { requestId })
@@ -421,7 +343,7 @@ export class RideOffer extends BaseEntity {
     await queryRunner.manager
       .createQueryBuilder()
       .update(RideOffer)
-      .set({ status: 'rejected', responseTime: new Date() })
+      .set({ status: 'rejected' })
       .where('rideRequestId = :requestId', { requestId })
       .andWhere('id != :offerId', { offerId: offer.id })
       .execute();

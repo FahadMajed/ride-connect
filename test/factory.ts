@@ -115,7 +115,7 @@ export const rideRequestFactory = (
     faker.number.float({ min: 10, max: 100, fractionDigits: 1 }).toFixed(2),
   ),
   estimatedArrivalTime: faker.date.future(),
-  estimatedDuration: '00:30:00', // 30 minutes as default
+  estimatedDurationInMinutes: 1, // 30 minutes as default
   requestExpiryTime: faker.date.future(),
   createdAt: faker.date.past(),
   updatedAt: faker.date.recent(),
@@ -126,7 +126,7 @@ export const rideAcceptanceStatusFactory = (
   overrides?: Partial<RideOffer>,
 ): Partial<RideOffer> => ({
   status: faker.helpers.arrayElement(['pending', 'accepted', 'rejected']),
-  responseTime: faker.date.recent(),
+
   createdAt: faker.date.past(),
   updatedAt: faker.date.recent(),
   ...overrides,

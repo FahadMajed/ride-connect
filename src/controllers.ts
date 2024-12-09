@@ -6,8 +6,9 @@ import {
   Post,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { Driver, Ride, RideOffer, RideRequest, SurgeArea } from './entities';
+import { Driver, Ride, RideOffer, RideRequest } from './entities';
 import { DataSource } from 'typeorm';
+import { LocationService, Pricer } from './services';
 
 @Controller('ride-requests')
 export class RideRequestController {
@@ -28,20 +29,36 @@ export class RideRequestController {
     await queryRunner.startTransaction();
 
     try {
-      //1. Create ride request with surge multiplier
-      const surgeMultiplier = await SurgeArea.getMultiplierForPoint(
-        request.pickupLocation,
-        queryRunner,
-      );
+      //1. Calculate the estimated fare
+
+      const { distanceKm, estimatedDurationInMinutes, estimatedArrivalTime } =
+        await LocationService.calculateTimeEstimates(
+          request.pickupLocation,
+          request.dropoffLocation,
+        );
+
+      const { estimatedFare, estimatedFareWithoutSurge } =
+        await Pricer.estimateFare({
+          vehicleTypeId: request.vehicleTypeId,
+          pickUpLocation: request.pickupLocation,
+          distanceKm: distanceKm,
+          estimatedDurationInMinutes: estimatedDurationInMinutes,
+
+          queryRunner,
+        });
 
       // 1.5 Create ride request, the fare will be calculated in the RideRequest.createRequest method
       // then the ride request will be saved to the database
       const rideRequest = await RideRequest.createRequest(queryRunner, {
         riderId: request.riderId,
-        vehicleTypeId: request.vehicleTypeId,
         pickupLocation: request.pickupLocation,
         dropoffLocation: request.dropoffLocation,
-        surgeMultiplier: surgeMultiplier,
+        vehicleTypeId: request.vehicleTypeId,
+
+        estimatedDurationInMinutes: estimatedDurationInMinutes,
+        estimatedFare: estimatedFare,
+        estimatedFareWithoutSurge: estimatedFareWithoutSurge,
+        estimatedArrivalTime: estimatedArrivalTime,
       });
 
       await queryRunner.manager.save(rideRequest);
