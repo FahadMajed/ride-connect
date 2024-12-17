@@ -434,11 +434,11 @@ export class RideOffer extends BaseEntity {
       throw new NotFoundException('Ride not found');
     }
 
-    const offer = await queryRunner.manager
-      .createQueryBuilder(RideOffer, 'offer')
-      .where('offer.rideId = :rideId', { rideId })
-      .andWhere('offer.driverId = :driverId', { driverId })
-      .getOne();
+    const offer = await RideOffer.getDriverPendingOffer(
+      rideId,
+      driverId,
+      queryRunner,
+    );
 
     if (!offer) {
       throw new NotFoundException('Offer not found');
@@ -454,15 +454,31 @@ export class RideOffer extends BaseEntity {
     await queryRunner.manager.save(offer);
 
     // Mark other offers as rejected
-    await queryRunner.manager
+    await RideOffer.rejectPendingOffers(rideId, queryRunner);
+
+    return offer;
+  }
+
+  private static getDriverPendingOffer(
+    rideId: number,
+    driverId: number,
+    queryRunner: QueryRunner,
+  ) {
+    return queryRunner.manager
+      .createQueryBuilder(RideOffer, 'offer')
+      .where('offer.rideId = :rideId', { rideId })
+      .andWhere('offer.driverId = :driverId', { driverId })
+      .getOne();
+  }
+
+  private static rejectPendingOffers(rideId: number, queryRunner: QueryRunner) {
+    return queryRunner.manager
       .createQueryBuilder()
       .update(RideOffer)
       .set({ status: 'rejected' })
       .where('rideId = :rideId', { rideId })
-      .andWhere('id != :offerId', { offerId: offer.id })
+      .andWhere('status != :status', { status: 'accepted' })
       .execute();
-
-    return offer;
   }
 }
 
