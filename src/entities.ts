@@ -1,6 +1,9 @@
 // src/entities/driver.entity.ts
 
-import { NotFoundException } from '@nestjs/common';
+import {
+  NotFoundException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import {
   Entity,
   Column,
@@ -334,6 +337,15 @@ export class Ride extends BaseEntity {
     return ride;
   }
 
+  static getPendingRide(queryRunner: QueryRunner, rideId: number) {
+    return queryRunner.manager
+      .createQueryBuilder(Ride, 'ride')
+      .setLock('pessimistic_write_or_fail')
+      .where('ride.id = :rideId', { rideId })
+      .andWhere('ride.status = :status', { status: 'pending' })
+      .getOne();
+  }
+
   static async start(
     queryRunner: QueryRunner,
     driverId: number,
@@ -415,15 +427,8 @@ export class RideOffer extends BaseEntity {
     driverId: number,
     queryRunner: QueryRunner,
   ): Promise<RideOffer> {
-    // Get the ride request with pessimistic lock
-
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const ride = await queryRunner.manager
-      .createQueryBuilder(Ride, 'ride')
-      .setLock('pessimistic_write_or_fail')
-      .where('ride.id = :rideId', { rideId })
-      .andWhere('ride.status = :status', { status: 'pending' })
-      .getOne();
+    // Get the ride  with pessimistic lock
+    const ride = await Ride.getPendingRide(queryRunner, rideId);
 
     if (!ride) {
       throw new NotFoundException('Ride not found');
@@ -431,14 +436,16 @@ export class RideOffer extends BaseEntity {
 
     const offer = await queryRunner.manager
       .createQueryBuilder(RideOffer, 'offer')
-
       .where('offer.rideId = :rideId', { rideId })
       .andWhere('offer.driverId = :driverId', { driverId })
-      .andWhere('offer.status = :status', { status: 'pending' })
       .getOne();
 
     if (!offer) {
       throw new NotFoundException('Offer not found');
+    }
+
+    if (offer.status != 'pending') {
+      throw new UnprocessableEntityException('Offer is accepted or rejected');
     }
 
     // Mark this offer as accepted
