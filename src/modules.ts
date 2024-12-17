@@ -8,13 +8,12 @@ import {
   Ride,
   RideOffer,
   Rider,
-  RideRequest,
   SurgeArea,
   VehicleType,
 } from './entities';
 
 import * as dotenv from 'dotenv';
-import { RideRequestController } from './controllers';
+import { RidesController } from './controllers';
 dotenv.config({ path: '.env.dev' });
 @Module({
   imports: [
@@ -31,7 +30,7 @@ dotenv.config({ path: '.env.dev' });
         Ride,
         Rating,
         VehicleType,
-        RideRequest,
+        Ride,
         RideOffer,
         Payment,
         PaymentMethod,
@@ -47,14 +46,14 @@ dotenv.config({ path: '.env.dev' });
       Ride,
       Rating,
       VehicleType,
-      RideRequest,
+      Ride,
       RideOffer,
       Payment,
       PaymentMethod,
       SurgeArea,
     ]),
   ],
-  controllers: [RideRequestController],
+  controllers: [RidesController],
   providers: [],
 })
 export class AppModule {}

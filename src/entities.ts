@@ -1,6 +1,6 @@
 // src/entities/driver.entity.ts
 
-import { UnprocessableEntityException } from '@nestjs/common';
+import { NotFoundException } from '@nestjs/common';
 import {
   Entity,
   Column,
@@ -14,6 +14,7 @@ import {
   LineString,
   QueryRunner,
 } from 'typeorm';
+import { TimeEstimator } from './services';
 
 @Entity('riders')
 export class Rider extends BaseEntity {
@@ -133,10 +134,16 @@ export class Driver extends BaseEntity {
   @UpdateDateColumn()
   updatedAt: Date;
 
-  static async findNearbyDriversIds(
+  static async findNearbyDrivers(
     pickupLocation: [number, number],
     queryRunner?: QueryRunner,
-  ): Promise<number[]> {
+  ): Promise<
+    {
+      estimatedPickUpTime: Date;
+      estimatedPickUpTimeInMinutes: number;
+      driverId: number;
+    }[]
+  > {
     const query = Driver.createQueryBuilder('driver')
       .select('driver.id')
       .addSelect(`ST_AsGeoJSON(driver.currentLocation)`, 'location')
@@ -161,7 +168,7 @@ export class Driver extends BaseEntity {
                     ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography
                 )`,
       )
-      .limit(5);
+      .limit(10);
 
     // If queryRunner is provided, use it
     if (queryRunner) {
@@ -170,12 +177,37 @@ export class Driver extends BaseEntity {
 
     const results = await query.getRawMany();
 
-    return results.map((row) => row.driver_id);
+    //now we will estimate the driver ETA from pickup, and we will get the nearest 5 drivers
+    const driversETA = await Promise.all(
+      results.map(async (driver) => {
+        return {
+          ...(await TimeEstimator.calculateTimeEstimates(
+            pickupLocation,
+            JSON.parse(driver.location).coordinates,
+          )),
+          driverId: driver.driver_id,
+        };
+      }),
+    );
+
+    const nearbyDrivers = driversETA
+      .sort(
+        (a, b) => a.estimatedDurationInMinutes - b.estimatedDurationInMinutes,
+      )
+      .slice(0, 5);
+
+    return nearbyDrivers.map((driver) => {
+      return {
+        driverId: driver.driverId,
+        estimatedPickUpTimeInMinutes: driver.estimatedDurationInMinutes,
+        estimatedPickUpTime: driver.estimatedArrivalTime,
+      };
+    });
   }
 }
 
-@Entity('ride_requests')
-export class RideRequest extends BaseEntity {
+@Entity('rides')
+export class Ride extends BaseEntity {
   @PrimaryGeneratedColumn('increment')
   id: number;
 
@@ -204,10 +236,10 @@ export class RideRequest extends BaseEntity {
 
   @Column({
     type: 'enum',
-    enum: ['pending', 'accepted', 'rejected', 'cancelled'],
+    enum: ['pending', 'in_progress', 'completed', 'cancelled'],
     default: 'pending',
   })
-  status: 'pending' | 'accepted' | 'rejected' | 'cancelled';
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
 
   @Column('decimal', { precision: 10, scale: 2 })
   estimatedFare: number;
@@ -220,146 +252,6 @@ export class RideRequest extends BaseEntity {
 
   @Column()
   requestExpiryTime: Date;
-
-  @CreateDateColumn()
-  createdAt: Date;
-
-  @UpdateDateColumn()
-  updatedAt: Date;
-
-  @Column()
-  riderId: number;
-  @Column()
-  vehicleTypeId: number;
-
-  @Column('decimal', { precision: 10, scale: 2 })
-  estimatedFareWithoutSurge: number;
-
-  static async createRequest(
-    queryRunner: QueryRunner,
-    request: {
-      riderId: number;
-      vehicleTypeId: number;
-      pickupLocation: [number, number];
-      dropoffLocation: [number, number];
-      estimatedArrivalTime: Date;
-      estimatedFareWithoutSurge: number;
-      estimatedFare: number;
-      estimatedDurationInMinutes: number;
-    },
-  ): Promise<RideRequest> {
-    const rideRequest = this.create({
-      riderId: request.riderId,
-      vehicleTypeId: request.vehicleTypeId,
-
-      pickupLocation: { type: 'Point', coordinates: request.pickupLocation },
-      dropoffLocation: { type: 'Point', coordinates: request.dropoffLocation },
-      status: 'pending',
-      requestTime: new Date(),
-      estimatedArrivalTime: request.estimatedArrivalTime,
-      estimatedFareWithoutSurge: request.estimatedFareWithoutSurge,
-      estimatedFare: request.estimatedFare,
-      estimatedDurationInMinutes: request.estimatedDurationInMinutes,
-      requestExpiryTime: new Date(Date.now() + 5 * 60000),
-    });
-
-    return queryRunner.manager.save(rideRequest);
-  }
-}
-
-@Entity('ride_offers')
-export class RideOffer extends BaseEntity {
-  @PrimaryGeneratedColumn('increment')
-  id: number;
-
-  @ManyToOne(() => Driver)
-  @JoinColumn({ name: 'driverId' })
-  driver: Driver;
-
-  @ManyToOne(() => RideRequest)
-  @JoinColumn({ name: 'rideRequestId' })
-  rideRequest: RideRequest;
-
-  @Column({
-    type: 'enum',
-    enum: ['pending', 'accepted', 'rejected'],
-    default: 'pending',
-  })
-  status: 'pending' | 'accepted' | 'rejected';
-
-  @CreateDateColumn()
-  createdAt: Date;
-
-  @UpdateDateColumn()
-  updatedAt: Date;
-
-  @Column()
-  driverId: number;
-
-  @Column()
-  rideRequestId: number;
-
-  static createRideOffers(
-    nearbyDrivers: number[],
-    rideRequest: RideRequest,
-    queryRunner: QueryRunner,
-  ) {
-    const offers = nearbyDrivers.map((driverId) => {
-      return this.create({
-        driverId,
-        rideRequestId: rideRequest.id,
-        status: 'pending',
-      });
-    });
-
-    return queryRunner.manager.save(offers);
-  }
-
-  static async acceptOffer(
-    requestId: number,
-    driverId: number,
-    queryRunner: QueryRunner,
-  ): Promise<RideOffer> {
-    // Get the acceptance with pessimistic lock
-    const offer = await queryRunner.manager
-      .createQueryBuilder(RideOffer, 'offer')
-      .setLock('pessimistic_write_or_fail')
-      .innerJoinAndSelect('offer.rideRequest', 'request')
-      .where('offer.rideRequestId = :requestId', { requestId })
-      .andWhere('offer.driverId = :driverId', { driverId })
-      .andWhere('offer.status = :status', { status: 'pending' })
-      .getOne();
-
-    if (!offer) {
-      throw new UnprocessableEntityException('Ride request not available');
-    }
-
-    // Mark this offer as accepted
-    offer.status = 'accepted';
-
-    await queryRunner.manager.save(offer);
-
-    // Mark other offers as rejected
-    await queryRunner.manager
-      .createQueryBuilder()
-      .update(RideOffer)
-      .set({ status: 'rejected' })
-      .where('rideRequestId = :requestId', { requestId })
-      .andWhere('id != :offerId', { offerId: offer.id })
-      .execute();
-
-    return offer;
-  }
-}
-
-@Entity('rides')
-export class Ride extends BaseEntity {
-  @PrimaryGeneratedColumn('increment')
-  id: number;
-
-  @ManyToOne(() => RideRequest)
-  @JoinColumn({ name: 'requestId' })
-  request: RideRequest;
 
   @ManyToOne(() => Driver)
   @JoinColumn({ name: 'driverId' })
@@ -379,18 +271,11 @@ export class Ride extends BaseEntity {
   })
   routeTaken: LineString;
 
-  @Column()
+  @Column({ nullable: true })
   startTime: Date;
 
   @Column({ nullable: true })
   endTime: Date;
-
-  @Column({
-    type: 'enum',
-    enum: ['in_progress', 'completed', 'cancelled'],
-    default: 'in_progress',
-  })
-  status: 'in_progress' | 'completed' | 'cancelled';
 
   @Column({ nullable: true })
   cancellationReason: string;
@@ -408,22 +293,172 @@ export class Ride extends BaseEntity {
   @UpdateDateColumn()
   updatedAt: Date;
 
-  static async createFromRequest(
-    queryRunner: QueryRunner,
-    driverId: number,
-    rideRequest: RideRequest,
-  ): Promise<Ride> {
-    const ride = this.create({
-      request: rideRequest,
+  @Column()
+  riderId: number;
+  @Column()
+  vehicleTypeId: number;
 
-      driver: { id: driverId },
-      startTime: new Date(),
-      status: 'in_progress',
+  @Column('decimal', { precision: 10, scale: 2 })
+  estimatedFareWithoutSurge: number;
+
+  @Column({ nullable: true })
+  estimatedPickUpTime: Date;
+
+  @Column({ nullable: true })
+  estimatedPickUpTimeInMinutes: number;
+
+  static async createPendingRide(request: {
+    riderId: number;
+    vehicleTypeId: number;
+    pickupLocation: [number, number];
+    dropoffLocation: [number, number];
+    estimatedArrivalTime: Date;
+    estimatedFareWithoutSurge: number;
+    estimatedFare: number;
+    estimatedDurationInMinutes: number;
+  }): Promise<Ride> {
+    const ride = this.create({
+      riderId: request.riderId,
+      vehicleTypeId: request.vehicleTypeId,
+      pickupLocation: { type: 'Point', coordinates: request.pickupLocation },
+      dropoffLocation: { type: 'Point', coordinates: request.dropoffLocation },
+      status: 'pending',
+      requestTime: new Date(),
+      estimatedArrivalTime: request.estimatedArrivalTime,
+      estimatedFareWithoutSurge: request.estimatedFareWithoutSurge,
+      estimatedFare: request.estimatedFare,
+      estimatedDurationInMinutes: request.estimatedDurationInMinutes,
+      requestExpiryTime: new Date(Date.now() + 5 * 60000),
     });
 
-    return queryRunner.manager.save(ride);
+    return ride;
+  }
+
+  static async start(
+    queryRunner: QueryRunner,
+    driverId: number,
+    offer: RideOffer,
+  ) {
+    return await queryRunner.manager.getRepository(Ride).save({
+      id: offer.rideId,
+      startTime: new Date(),
+      driver: {
+        id: driverId,
+      },
+      estimatedPickUpTime: offer.estimatedPickUpTime,
+      estimatedPickUpTimeInMinutes: offer.estimatedPickUpTimeInMinutes,
+      status: 'in_progress',
+    });
   }
 }
+
+@Entity('ride_offers')
+export class RideOffer extends BaseEntity {
+  @PrimaryGeneratedColumn('increment')
+  id: number;
+
+  @ManyToOne(() => Driver)
+  @JoinColumn({ name: 'driverId' })
+  driver: Driver;
+
+  @ManyToOne(() => Ride)
+  @JoinColumn({ name: 'rideId' })
+  ride: Ride;
+
+  @Column({
+    type: 'enum',
+    enum: ['pending', 'accepted', 'rejected'],
+    default: 'pending',
+  })
+  status: 'pending' | 'accepted' | 'rejected';
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+
+  @Column()
+  driverId: number;
+
+  @Column()
+  rideId: number;
+
+  @Column()
+  estimatedPickUpTime: Date;
+
+  @Column()
+  estimatedPickUpTimeInMinutes: number;
+
+  static createRideOffers(
+    nearbyDrivers: {
+      estimatedPickUpTime: Date;
+      estimatedPickUpTimeInMinutes: number;
+      driverId: number;
+    }[],
+    ride: Ride,
+    queryRunner: QueryRunner,
+  ) {
+    const offers = nearbyDrivers.map((driver) => {
+      return this.create({
+        ...driver,
+        rideId: ride.id,
+        status: 'pending',
+      });
+    });
+
+    return queryRunner.manager.save(offers);
+  }
+
+  static async acceptOffer(
+    rideId: number,
+    driverId: number,
+    queryRunner: QueryRunner,
+  ): Promise<RideOffer> {
+    // Get the ride request with pessimistic lock
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const ride = await queryRunner.manager
+      .createQueryBuilder(Ride, 'ride')
+      .setLock('pessimistic_write_or_fail')
+      .where('ride.id = :rideId', { rideId })
+      .andWhere('ride.status = :status', { status: 'pending' })
+      .getOne();
+
+    if (!ride) {
+      throw new NotFoundException('Ride not found');
+    }
+
+    const offer = await queryRunner.manager
+      .createQueryBuilder(RideOffer, 'offer')
+
+      .where('offer.rideId = :rideId', { rideId })
+      .andWhere('offer.driverId = :driverId', { driverId })
+      .andWhere('offer.status = :status', { status: 'pending' })
+      .getOne();
+
+    if (!offer) {
+      throw new NotFoundException('Offer not found');
+    }
+
+    // Mark this offer as accepted
+    offer.status = 'accepted';
+
+    await queryRunner.manager.save(offer);
+
+    // Mark other offers as rejected
+    await queryRunner.manager
+      .createQueryBuilder()
+      .update(RideOffer)
+      .set({ status: 'rejected' })
+      .where('rideId = :rideId', { rideId })
+      .andWhere('id != :offerId', { offerId: offer.id })
+      .execute();
+
+    return offer;
+  }
+}
+
 @Entity('ratings')
 export class Rating extends BaseEntity {
   @PrimaryGeneratedColumn('increment')

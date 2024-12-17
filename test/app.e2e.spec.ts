@@ -7,17 +7,16 @@ import { AppModule } from '../src/modules';
 import { driverFactory, riderFactory, vehicleTypeFactory } from './factory';
 import {
   Driver,
-  Ride,
   RideOffer,
   Rider,
-  RideRequest,
+  Ride,
   SurgeArea,
   VehicleType,
 } from 'src/entities';
 import { DataSource, Not } from 'typeorm';
 import { TimeEstimator } from 'src/services';
 
-describe('Ride Requests (e2e)', () => {
+describe('Rides (e2e)', () => {
   let app: INestApplication;
 
   beforeEach(async () => {
@@ -72,7 +71,7 @@ describe('Ride Requests (e2e)', () => {
     });
   });
 
-  describe('(POST) /ride-requests', () => {
+  describe('(POST) /rides', () => {
     test('should create a ride request and generate offers for nearby drivers', async () => {
       // 1. Setup test data
       const rider = riderFactory({
@@ -125,7 +124,7 @@ describe('Ride Requests (e2e)', () => {
 
       // 2. Make request to create ride request
       const response = await request(app.getHttpServer())
-        .post('/ride-requests')
+        .post('/rides')
         .send({
           riderId: rider.id,
           vehicleTypeId: vehicleType.id,
@@ -136,22 +135,22 @@ describe('Ride Requests (e2e)', () => {
 
       // 3. Verify response
       expect(response.status).toBe(201);
-      expect(response.body).toHaveProperty('rideRequestId');
+      expect(response.body).toHaveProperty('rideId');
 
       // 4. Verify database state
       // Check ride request was created
-      const rideRequest = await RideRequest.findOne({
-        where: { id: response.body.rideRequestId },
+      const ride = await Ride.findOne({
+        where: { id: response.body.rideId },
         relations: ['rider', 'vehicleType'],
       });
-      expect(rideRequest).toBeDefined();
-      expect(rideRequest.status).toBe('pending');
-      expect(rideRequest.rider.id).toBe(rider.id);
-      expect(rideRequest.vehicleType.id).toBe(vehicleType.id);
+      expect(ride).toBeDefined();
+      expect(ride.status).toBe('pending');
+      expect(ride.rider.id).toBe(rider.id);
+      expect(ride.vehicleType.id).toBe(vehicleType.id);
 
       // Verify ride offer requests were created for all nearby drivers
       const offers = await RideOffer.find({
-        where: { rideRequest: { id: response.body.id } },
+        where: { ride: { id: response.body.id } },
         relations: ['driver'],
       });
 
@@ -214,7 +213,7 @@ describe('Ride Requests (e2e)', () => {
 
       // 2. Make request to create ride request
       const response = await request(app.getHttpServer())
-        .post('/ride-requests')
+        .post('/rides')
         .send({
           riderId: rider.id,
           vehicleTypeId: vehicleType.id,
@@ -224,17 +223,17 @@ describe('Ride Requests (e2e)', () => {
 
       // 3. Verify response
       expect(response.status).toBe(201);
-      expect(response.body).toHaveProperty('rideRequestId');
+      expect(response.body).toHaveProperty('rideId');
 
       // 4. Verify database state
-      const rideRequest = await RideRequest.findOne({
-        where: { id: response.body.rideRequestId },
+      const ride = await Ride.findOne({
+        where: { id: response.body.rideId },
       });
 
       // Verify that the estimated fare reflects surge pricing
       // The fare should be roughly 1.8 times what it would be without surge
       // but we'll allow some floating-point variance
-      const baseEstimate = await RideRequest.findOne({
+      const baseEstimate = await Ride.findOne({
         where: {
           riderId: rider.id,
           vehicleTypeId: vehicleType.id,
@@ -242,16 +241,16 @@ describe('Ride Requests (e2e)', () => {
         },
       });
 
-      expect(Number(rideRequest.estimatedFare)).toBeGreaterThan(
+      expect(Number(ride.estimatedFare)).toBeGreaterThan(
         Number(baseEstimate.estimatedFareWithoutSurge) * 1.7, // allowing some variance
       );
-      expect(Number(rideRequest.estimatedFare)).toBeLessThan(
+      expect(Number(ride.estimatedFare)).toBeLessThan(
         Number(baseEstimate.estimatedFareWithoutSurge) * 1.9, // allowing some variance
       );
     });
   });
 
-  describe('(POST) /ride-requests/:id/accept', () => {
+  describe('(POST) /rides/:id/accept', () => {
     test('should successfully accept a ride request and create a ride', async () => {
       // 1. Setup test data
       const rider = riderFactory({
@@ -275,7 +274,7 @@ describe('Ride Requests (e2e)', () => {
 
       // 2. Create initial ride request
       const createResponse = await request(app.getHttpServer())
-        .post('/ride-requests')
+        .post('/rides')
         .send({
           riderId: rider.id,
           vehicleTypeId: vehicleType.id,
@@ -293,7 +292,7 @@ describe('Ride Requests (e2e)', () => {
       expect(offer.driverId).toEqual(driver.id);
 
       const acceptResponse = await request(app.getHttpServer())
-        .post(`/ride-requests/${offer.rideRequestId}/accept`)
+        .post(`/rides/${offer.rideId}/accept`)
         .send({
           driverId: driver.id,
         });
@@ -308,7 +307,7 @@ describe('Ride Requests (e2e)', () => {
       // Check ride offer status
       offer = await RideOffer.findOne({
         where: {
-          rideRequestId: createResponse.body.id,
+          rideId: createResponse.body.id,
           driverId: driver.id,
         },
       });
@@ -317,18 +316,17 @@ describe('Ride Requests (e2e)', () => {
       // Check ride was created
       const ride = await Ride.findOne({
         where: { id: acceptResponse.body.id },
-        relations: ['driver', 'request'],
+        relations: ['driver'],
       });
       expect(ride).toBeDefined();
       expect(ride.status).toBe('in_progress');
       expect(ride.driver.id).toBe(driver.id);
-      expect(ride.request.id).toBe(createResponse.body.rideRequestId);
       expect(ride.startTime).toBeDefined();
 
       // Check other drivers' offer statuses were rejected
       const otherAcceptances = await RideOffer.find({
         where: {
-          rideRequestId: createResponse.body.rideRequestId,
+          rideId: createResponse.body.rideId,
           driverId: Not(driver.id),
         },
       });
@@ -337,7 +335,7 @@ describe('Ride Requests (e2e)', () => {
       });
     });
 
-    test('should prevent multiple drivers from accepting the same request', async () => {
+    test('should prevent multiple drivers from accepting the same ride', async () => {
       // 1. Setup test data
       const rider = riderFactory({
         status: 'active',
@@ -370,7 +368,7 @@ describe('Ride Requests (e2e)', () => {
 
       // 2. Create ride request
       const createResponse = await request(app.getHttpServer())
-        .post('/ride-requests')
+        .post('/rides')
         .send({
           riderId: rider.id,
           vehicleTypeId: vehicleType.id,
@@ -380,7 +378,7 @@ describe('Ride Requests (e2e)', () => {
 
       // 3. First driver accepts the request
       const firstAcceptResponse = await request(app.getHttpServer())
-        .post(`/ride-requests/${createResponse.body.rideRequestId}/accept`)
+        .post(`/rides/${createResponse.body.rideId}/accept`)
         .send({
           driverId: driver1.id,
         });
@@ -389,19 +387,19 @@ describe('Ride Requests (e2e)', () => {
 
       // 4. Second driver attempts to accept the same request
       const secondAcceptResponse = await request(app.getHttpServer())
-        .post(`/ride-requests/${createResponse.body.rideRequestId}/accept`)
+        .post(`/rides/${createResponse.body.rideId}/accept`)
         .send({
           driverId: driver2.id,
         });
 
       // 5. Verify the second attempt fails
-      expect(secondAcceptResponse.status).toBe(422);
+      expect(secondAcceptResponse.status).toBe(404);
 
       // 6. Verify database state
       // Check first driver's offer is still valid
       const firstDriverAcceptance = await RideOffer.findOne({
         where: {
-          rideRequestId: createResponse.body.rideRequestId,
+          rideId: createResponse.body.rideId,
           driverId: driver1.id,
         },
       });
@@ -410,17 +408,14 @@ describe('Ride Requests (e2e)', () => {
       // Check second driver's offer was rejected
       const secondDriverAcceptance = await RideOffer.findOne({
         where: {
-          rideRequestId: createResponse.body.rideRequestId,
+          rideId: createResponse.body.rideId,
           driverId: driver2.id,
         },
       });
       expect(secondDriverAcceptance.status).toBe('rejected');
 
-      // Verify only one ride was created
+      // Verify the first driver was assigned
       const rides = await Ride.find({
-        where: {
-          request: { id: createResponse.body.rideRequestId },
-        },
         relations: ['driver'],
       });
       expect(rides).toHaveLength(1);

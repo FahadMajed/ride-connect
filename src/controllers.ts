@@ -6,12 +6,12 @@ import {
   Post,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { Driver, Ride, RideOffer, RideRequest } from './entities';
+import { Driver, RideOffer, Ride } from './entities';
 import { DataSource } from 'typeorm';
 import { TimeEstimator, Pricer } from './services';
 
-@Controller('ride-requests')
-export class RideRequestController {
+@Controller('rides')
+export class RidesController {
   constructor(private readonly dataSource: DataSource) {}
 
   @Post()
@@ -49,22 +49,21 @@ export class RideRequestController {
 
       // 1.5 Create ride request, the fare will be calculated in the RideRequest.createRequest method
       // then the ride request will be saved to the database
-      const rideRequest = await RideRequest.createRequest(queryRunner, {
+      const pendingRide = await Ride.createPendingRide({
         riderId: request.riderId,
         pickupLocation: request.pickupLocation,
         dropoffLocation: request.dropoffLocation,
         vehicleTypeId: request.vehicleTypeId,
-
         estimatedDurationInMinutes: estimatedDurationInMinutes,
         estimatedFare: estimatedFare,
         estimatedFareWithoutSurge: estimatedFareWithoutSurge,
         estimatedArrivalTime: estimatedArrivalTime,
       });
 
-      await queryRunner.manager.save(rideRequest);
+      await queryRunner.manager.save(pendingRide);
 
       // 2. Find nearby drivers
-      const nearbyDrivers = await Driver.findNearbyDriversIds(
+      const nearbyDrivers = await Driver.findNearbyDrivers(
         request.pickupLocation,
         queryRunner,
       );
@@ -75,15 +74,15 @@ export class RideRequestController {
 
       // 3. Create ride acceptance requests for each nearby driver
 
-      RideOffer.createRideOffers(nearbyDrivers, rideRequest, queryRunner);
+      RideOffer.createRideOffers(nearbyDrivers, pendingRide, queryRunner);
 
       await queryRunner.commitTransaction();
 
       // 4. Return ride request id
       return {
-        rideRequestId: rideRequest.id,
-        estimatedFare: rideRequest.estimatedFare,
-        estimatedArrivalTime: rideRequest.estimatedArrivalTime,
+        rideId: pendingRide.id,
+        estimatedFare: pendingRide.estimatedFare,
+        estimatedArrivalTime: pendingRide.estimatedArrivalTime,
       };
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -95,7 +94,7 @@ export class RideRequestController {
 
   @Post(':id/accept')
   async acceptRide(
-    @Param('id', ParseIntPipe) requestId: number,
+    @Param('id', ParseIntPipe) rideId: number,
     @Body() request: { driverId: number },
   ) {
     const queryRunner = this.dataSource.createQueryRunner();
@@ -103,17 +102,13 @@ export class RideRequestController {
     await queryRunner.startTransaction();
 
     try {
-      const acceptance = await RideOffer.acceptOffer(
-        requestId,
+      const offer = await RideOffer.acceptOffer(
+        rideId,
         request.driverId,
         queryRunner,
       );
 
-      const ride = await Ride.createFromRequest(
-        queryRunner,
-        request.driverId,
-        acceptance.rideRequest,
-      );
+      const ride = await Ride.start(queryRunner, request.driverId, offer);
 
       await queryRunner.commitTransaction();
       return ride;

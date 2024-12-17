@@ -7,7 +7,6 @@ import {
   Ride,
   RideOffer,
   Rider,
-  RideRequest,
   SurgeArea,
   VehicleType,
 } from 'src/entities';
@@ -99,29 +98,6 @@ export const vehicleTypeFactory = (
   ...overrides,
 });
 
-export const rideRequestFactory = (
-  overrides?: Partial<RideRequest>,
-): Partial<RideRequest> => ({
-  pickupLocation: createRandomPoint(),
-  dropoffLocation: createRandomPoint(),
-  requestTime: faker.date.recent(),
-  status: faker.helpers.arrayElement([
-    'pending',
-    'accepted',
-    'rejected',
-    'cancelled',
-  ]),
-  estimatedFare: parseFloat(
-    faker.number.float({ min: 10, max: 100, fractionDigits: 1 }).toFixed(2),
-  ),
-  estimatedArrivalTime: faker.date.future(),
-  estimatedDurationInMinutes: 1, // 30 minutes as default
-  requestExpiryTime: faker.date.future(),
-  createdAt: faker.date.past(),
-  updatedAt: faker.date.recent(),
-  ...overrides,
-});
-
 export const rideAcceptanceStatusFactory = (
   overrides?: Partial<RideOffer>,
 ): Partial<RideOffer> => ({
@@ -138,7 +114,12 @@ export const rideFactory = (overrides?: Partial<Ride>): Partial<Ride> => ({
   startTime: faker.date.past(),
   endTime: faker.date.future(),
 
-  status: faker.helpers.arrayElement(['in_progress', 'completed', 'cancelled']),
+  status: faker.helpers.arrayElement([
+    'pending',
+    'in_progress',
+    'completed',
+    'cancelled',
+  ]),
   cancellationReason: faker.helpers.maybe(() => faker.lorem.sentence()),
   cancelledBy: faker.helpers.maybe(() =>
     faker.helpers.arrayElement(['rider', 'driver']),
